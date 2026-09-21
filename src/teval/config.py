@@ -97,8 +97,11 @@ class SystemConfig(BaseModel):
     cpu: int = Field(
         default=-1,
         description=(
-            "Number of CPUs for within-domain parallelism (hydrograph rendering, "
-            "animation frames). -1 = use all available cores."
+            "Number of CPUs for all parallel work (Dask compute, hydrograph "
+            "rendering, animation frames, skill maps). Used as given, even beyond "
+            "a Slurm allocation. -1 = the CPUs allocated to this job: "
+            "SLURM_CPUS_PER_TASK under Slurm, otherwise the cores this process "
+            "may run on."
         ),
     )
     domain_workers: int = Field(

@@ -14,6 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
+import dask
 import numpy as np
 import pandas as pd
 import pytest
@@ -36,16 +37,17 @@ TIMES = pd.date_range("2020-06-01", periods=N_TIMES, freq="h")
 
 
 @pytest.fixture(autouse=True)
-def restore_logging_levels():
+def restore_global_state():
     """
-    Put the root and ``teval`` logger levels back after each run.
+    Put the logger levels and Dask's worker count back after each run.
 
-    ``main`` calls ``configure_logging``, which sets both globally; left alone
-    it would outlive this module and change what every later test sees.
+    ``main`` sets all three globally; left alone they would outlive this
+    module and change what every later test sees.
     """
     root_level = logging.getLogger().level
     teval_level = logging.getLogger("teval").level
-    yield
+    with dask.config.set(num_workers=dask.config.get("num_workers", None)):
+        yield
     logging.getLogger().setLevel(root_level)
     logging.getLogger("teval").setLevel(teval_level)
 

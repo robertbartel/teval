@@ -7,7 +7,6 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional
 import logging
-import multiprocessing
 from joblib import Parallel, delayed
 import gc
 
@@ -424,7 +423,9 @@ def _render_single_hydrograph(gage, fids, nexus_id, ds_stats, obs_df, viz, stats
     gc.collect()
 
 
-def produce_domain_specific_visualizations(domain_data: Dict, viz: VizConfig, io: IOConfig, stats: StatsConfig):
+def produce_domain_specific_visualizations(
+    domain_data: Dict, viz: VizConfig, io: IOConfig, stats: StatsConfig, n_workers: int
+):
     """
     Given the loaded domain data and visualization config, produces and saves visualizations.
     """
@@ -479,8 +480,7 @@ def produce_domain_specific_visualizations(domain_data: Dict, viz: VizConfig, io
         logger.debug(f"Generating {len(valid_gages)} hydrographs in parallel...")
         
         with Timer("Plotting Hydrographs", category="visualization"):
-            n_cores = max(1, multiprocessing.cpu_count() - 1)
-            Parallel(n_jobs=n_cores)(
+            Parallel(n_jobs=n_workers)(
                 delayed(_render_single_hydrograph)(
                     gage, 
                     gage_to_fids[gage],
@@ -567,5 +567,6 @@ def produce_domain_specific_visualizations(domain_data: Dict, viz: VizConfig, io
                 output_path=str(out_gif),
                 var_name=viz.animation.variable,
                 fps=viz.animation.fps,
-                add_basemap=True
+                add_basemap=True,
+                n_workers=n_workers
             )

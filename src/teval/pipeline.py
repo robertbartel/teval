@@ -20,8 +20,11 @@ run_interactive_map(metrics_df, config)
     Render the Folium HTML interactive map.
 
 get_worker_count(config)
-    Return the number of workers to use, honouring SLURM_CPUS_PER_TASK when
-    running under Slurm.
+    Return the number of workers to use: system.cpu, or the CPUs allocated to
+    this job when it is -1.
+
+configure_dask(config)
+    Size Dask's threaded scheduler to get_worker_count(config).
 """
 
 from __future__ import annotations
@@ -49,15 +52,24 @@ def get_worker_count(config) -> int:
     """
     Return the number of parallel workers for this run.
 
-    Respects SLURM_CPUS_PER_TASK when running inside a Slurm job so the
-    process never tries to use more cores than the scheduler allocated.
-    Falls back to config.system.cpu (-1 means all available cores).
+    An explicit ``system.cpu`` is used as given; keeping it within a Slurm
+    allocation is up to the user.  -1 means the CPUs this job was allocated:
+    SLURM_CPUS_PER_TASK inside a Slurm job, otherwise the cores this process
+    may run on.
     """
+    if config.system.cpu != -1:
+        return config.system.cpu
     slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
     if slurm_cpus:
         return int(slurm_cpus)
-    n = getattr(config.system, "cpu", -1)
-    return os.cpu_count() if n == -1 else n
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
+
+
+def configure_dask(config) -> None:
+    """Size Dask's threaded scheduler, used by every compute, to the run."""
+    dask.config.set(num_workers=get_worker_count(config))
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +283,8 @@ def run_domain(
     if viz_enabled:
         with Timer(f"[{domain_name}] Visualizations", category="visualization"):
             workflow.produce_domain_specific_visualizations(
-                domain_data, config.viz, config.io, config.stats
+                domain_data, config.viz, config.io, config.stats,
+                get_worker_count(config),
             )
 
     logger.debug(f"[{domain_name}] Done.")

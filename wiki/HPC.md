@@ -22,7 +22,7 @@ python -m teval -c teval_config_conus.yaml
 
 ## Worker count
 
-teval automatically respects `SLURM_CPUS_PER_TASK` for parallel operations (hydrograph rendering, skill map generation). You do not need to set `system.cpu` in your config when running under Slurm — it will use the allocated core count automatically.
+`system.cpu` sets the worker count for all parallel work: the Dask ensemble compute, hydrograph rendering, animation frames, and skill maps. With the default `-1`, teval uses the job's allocation — `SLURM_CPUS_PER_TASK` under Slurm — so you do not need to set it when running under Slurm. An explicit value is used as given, even if it exceeds the allocation; keep it consistent with `--cpus-per-task` yourself.
 
 ## Filesystem notes
 

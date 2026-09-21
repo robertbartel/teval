@@ -9,7 +9,9 @@ import pandas as pd
 
 from teval.config import TevalConfig, generate_default_config, generate_config_help
 from teval.io import initialize_domains
-from teval.pipeline import run_domain, run_skill_maps, run_interactive_map
+from teval.pipeline import (
+    configure_dask, get_worker_count, run_domain, run_skill_maps, run_interactive_map,
+)
 from teval.utils import Timer, configure_logging, configure_timing, print_timing_summary
 
 logging.basicConfig(
@@ -62,6 +64,9 @@ def main():
     # Disable POSIX file locking so multiple threads can safely read HDF5 files
     # concurrently.
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+
+    configure_dask(config)
+    logger.info(f"Parallel workers: {get_worker_count(config)}")
 
     # ------------------------------------------------------------------ #
     # Domain processing                                                   #

@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
 from joblib import Parallel, delayed
-import multiprocessing
 
 def _render_frame(i, t, current_vals, gdf_sorted, cmap, norm, dynamic_lw, temp_dir, var_name, add_basemap):
     """Worker function to render a single animation frame."""
@@ -45,7 +44,7 @@ def _render_frame(i, t, current_vals, gdf_sorted, cmap, norm, dynamic_lw, temp_d
     return str(frame_path)
 
 
-def animate_network(gdf, stats_ds, output_path, var_name="streamflow_mean", fps=8, add_basemap=True, log_scale=True):
+def animate_network(gdf, stats_ds, output_path, var_name="streamflow_mean", fps=8, add_basemap=True, log_scale=True, n_workers=1):
     """Render a time-lapse GIF of streamflow across the river network."""
     da = stats_ds[var_name]
     
@@ -89,10 +88,8 @@ def animate_network(gdf, stats_ds, output_path, var_name="streamflow_mean", fps=
     temp_dir = Path(tempfile.mkdtemp())
     total_frames = len(times)
     
-    n_cores = max(1, multiprocessing.cpu_count() - 1)
-    
     # Blast the frames to the CPU cores
-    frame_files = Parallel(n_jobs=n_cores)(
+    frame_files = Parallel(n_jobs=n_workers)(
         delayed(_render_frame)(
             i, t, np.maximum(data_values[i, :], global_min), 
             gdf_sorted, cmap, norm, dynamic_lw, temp_dir, var_name, add_basemap
