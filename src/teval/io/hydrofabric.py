@@ -5,7 +5,7 @@ Load and prepare NextGen hydrofabric GeoPackages.
 
 Public API
 ----------
-load_hydrofabric(gpkg_path)
+load_hydrofabric(gpkg_path, gpkg_layer="flowpaths")
     Read a ``.gpkg`` file and return the flowpath GeoDataFrame together with
     the gage crosswalk structures needed downstream.
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def load_hydrofabric(
     gpkg_path: Optional[Path],
-    gpkg_layer: Optional[str]
+    gpkg_layer: str = "flowpaths",
 ) -> Tuple[gpd.GeoDataFrame, List[str], Dict, Dict]:
     """
     Load a hydrofabric GeoPackage and build the gage crosswalk.

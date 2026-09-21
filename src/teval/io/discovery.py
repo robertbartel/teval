@@ -156,7 +156,6 @@ def initialize_domains(io: IOConfig, stats: StatsConfig, metrics: MetricsConfig,
                     "ensemble_file": Path | None,
                 },
                 "hydrofabric": Path | None,
-                "hydrofabric_layer": str | None,
                 "gage_obs": {"domain_name": [...], "obs_file": [...]},
             },
             ...
@@ -219,7 +218,6 @@ def _create_empty_domain_dict(
         else:
             gpkgs = list(io.hydrofabric_dir.glob(f"*{domain_name}*.gpkg"))
         gpkg_path = gpkgs[0] if gpkgs else None
-        gpkg_layer = io.hydrofabric_layer
 
     obs_info: dict = {}
     if fetch_obs:
@@ -233,6 +231,5 @@ def _create_empty_domain_dict(
     return {
         "formulations": {"raw_files": {}, "ensemble_file": None},
         "hydrofabric": gpkg_path,
-        "hydrofabric_layer": gpkg_layer,
         "gage_obs": obs_info,
     }

@@ -30,7 +30,7 @@ class IOConfig(BaseModel):
             "Files matched by domain name: '*{domain_name}*.gpkg'."
         ),
     )
-    hydrofabric_layer: Optional[str] = Field(
+    hydrofabric_layer: str = Field(
         default="flowpaths",
         description=(
             "The layer to read from the hydrofabric, flowpaths or flowlines."

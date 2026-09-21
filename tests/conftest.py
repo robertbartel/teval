@@ -193,7 +193,7 @@ def hydrofabric(monkeypatch, flowpaths_frame):
     monkeypatch.setattr(
         workflow,
         "load_hydrofabric",
-        lambda gpkg_path: (flowpaths_frame, [], {}, {}),
+        lambda gpkg_path, gpkg_layer: (flowpaths_frame, [], {}, {}),
     )
     return flowpaths_frame
 
@@ -204,5 +204,5 @@ def no_hydrofabric(monkeypatch):
     monkeypatch.setattr(
         workflow,
         "load_hydrofabric",
-        lambda gpkg_path: (gpd.GeoDataFrame(), [], {}, {}),
+        lambda gpkg_path, gpkg_layer: (gpd.GeoDataFrame(), [], {}, {}),
     )

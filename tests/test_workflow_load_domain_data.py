@@ -136,16 +136,18 @@ def test_hydrofabric_is_loaded_before_the_stats_graph_can_fail(
 # --------------------------------------------------------------------- #
 def test_hydrofabric_receives_only_the_domain_hydrofabric_entry(domain_dict, calls):
     """
-    ``load_hydrofabric`` is handed the hydrofabric entry and nothing else.
+    ``load_hydrofabric`` is handed the hydrofabric entry and the configured
+    layer, nothing else.
 
     If it took anything derived from the formulations, hoisting it above the
     formulation step would be wrong; this asserts the independence the reorder
     relies on rather than assuming it.
     """
-    workflow.load_domain_data(domain_dict, IOConfig(), StatsConfig())
+    io = IOConfig(hydrofabric_layer="flowlines")
+    workflow.load_domain_data(domain_dict, io, StatsConfig())
 
     _name, args, kwargs = calls[0]
-    assert args == (domain_dict["hydrofabric"],)
+    assert args == (domain_dict["hydrofabric"], "flowlines")
     assert kwargs == {}
 
 
@@ -175,7 +177,7 @@ def test_only_the_hydrofabric_key_is_read_before_the_hydrofabric_loads(monkeypat
         gage_obs={"domain_name": [], "obs_file": []},
     )
 
-    def fake_load_hydrofabric(gpkg_path):
+    def fake_load_hydrofabric(gpkg_path, gpkg_layer):
         touched_at_hydrofabric_time.extend(read_keys)
         return HYDROFABRIC_RESULT
 
@@ -235,7 +237,9 @@ def _load_domain_data_previous_order(domain_dict, io, stats_config):
     results['formulations']['ensemble_members'] = ds_members
 
     (results['hydrofabric'], all_gage_ids, results['gage_to_fids'],
-     results['gage_to_nexus']) = workflow.load_hydrofabric(domain_dict['hydrofabric'])
+     results['gage_to_nexus']) = workflow.load_hydrofabric(
+        domain_dict['hydrofabric'], io.hydrofabric_layer
+    )
 
     initial_gages = domain_dict.get('gage_obs', {}).get('domain_name', [])
     if "CONUS" in initial_gages:
@@ -312,8 +316,8 @@ def test_a_domain_without_a_hydrofabric_still_loads(domain_dict, monkeypatch, ca
     """
     domain_dict["hydrofabric"] = None
 
-    def empty_hydrofabric(gpkg_path):
-        calls.append(("hydrofabric", (gpkg_path,), {}))
+    def empty_hydrofabric(gpkg_path, gpkg_layer):
+        calls.append(("hydrofabric", (gpkg_path, gpkg_layer), {}))
         return gpd.GeoDataFrame(), [], {}, {}
 
     monkeypatch.setattr(workflow, "load_hydrofabric", empty_hydrofabric)
