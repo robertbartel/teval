@@ -24,6 +24,18 @@ python -m teval -c teval_config_conus.yaml
 
 `system.cpu` sets the worker count for all parallel work: the Dask ensemble compute, hydrograph rendering, animation frames, and skill maps. With the default `-1`, teval uses the job's allocation — `SLURM_CPUS_PER_TASK` under Slurm — so you do not need to set it when running under Slurm. An explicit value is used as given, even if it exceeds the allocation; keep it consistent with `--cpus-per-task` yourself.
 
+## Compute nodes without network access
+
+Download observations first, where there is network access (a login node), with the same config the job will use:
+
+```bash
+python -m teval -c teval_config_conus.yaml --fetch
+```
+
+This writes everything the run needs to `io.observations_file`, with a record of what was requested beside it (`<file>.fetch.json`). Re-running it downloads nothing unless the config now needs more gages or a longer period. It reads only gage IDs and time coordinates, so it is light enough for a login node.
+
+Then set `io.offline: true` for the Slurm job. The run makes no network calls, draws maps without basemaps, and stops at startup if the observations it needs are not in `io.observations_file`.
+
 ## Filesystem notes
 
 teval sets `HDF5_USE_FILE_LOCKING=FALSE` at startup. This is required on Lustre (`/scratch3`, `/scratch4`) to prevent HDF5 locking conflicts when Dask opens multiple NetCDF files in parallel threads.

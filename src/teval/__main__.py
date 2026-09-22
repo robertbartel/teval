@@ -8,6 +8,7 @@ import sys
 import pandas as pd
 
 from teval.config import TevalConfig, generate_default_config, generate_config_help
+from teval.fetch import fetch, offline_problems
 from teval.io import initialize_domains
 from teval.pipeline import (
     configure_dask, get_worker_count, run_domain, run_skill_maps, run_interactive_map,
@@ -35,6 +36,14 @@ def main():
     parser.add_argument(
         "--help-config", action="store_true",
         help="Print a detailed guide of all configuration parameters.",
+    )
+    parser.add_argument(
+        "--fetch", action="store_true",
+        help=(
+            "Download the observations this configuration's run needs into "
+            "io.observations_file, then exit. Run it where there is network "
+            "access, then run with io.offline: true where there is none."
+        ),
     )
 
     args = parser.parse_args()
@@ -65,6 +74,10 @@ def main():
     # concurrently.
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
+    if args.fetch:
+        fetch(config)
+        sys.exit(0)
+
     configure_dask(config)
     logger.info(f"Parallel workers: {get_worker_count(config)}")
 
@@ -83,6 +96,14 @@ def main():
     domain_map = {}
 
     if run_domain_processing:
+        if config.io.offline:
+            problems = offline_problems(config)
+            for problem in problems:
+                logger.error(problem)
+            if problems:
+                logger.error("Run with --fetch where there is network access first.")
+                sys.exit(1)
+
         with Timer("Domain Discovery", category="discovery"):
             domain_map = initialize_domains(config.io, config.stats, config.metrics, config.viz)
         

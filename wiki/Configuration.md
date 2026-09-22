@@ -31,6 +31,7 @@ python -m teval --help-config
 | `hydrofabric_dir` | path | Directory containing `.gpkg` hydrofabric file(s) |
 | `observations_file` | path | USGS observations Parquet or CSV file |
 | `auto_download_usgs` | bool | Download observations via USGS API if file not found |
+| `offline` | bool | Never use the network: no USGS download, no basemaps. Stops at startup if `observations_file` lacks what the run needs (see `--fetch` in [HPC](HPC.md)) |
 | `save_downloaded_obs` | path | Save downloaded observations to this path |
 | `output_dir` | path | Root output directory |
 | `per_domain_output` | bool | Create per-domain subdirectories under `output_dir` |
@@ -56,7 +57,7 @@ troute_netcdf_dir/
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `cpu` | int | `-1` | Worker count. `-1` = all cores. Respects `SLURM_CPUS_PER_TASK`. |
+| `cpu` | int | `-1` | Worker count for all parallel work, used as given. `-1` = the job's allocation (`SLURM_CPUS_PER_TASK`, else the cores this process may use). |
 | `stream_to_disk` | bool | `true` | Write ensemble NC during compute pass (recommended for CONUS) |
 | `use_dask` | bool | `true` | Use Dask lazy evaluation |
 | `logging_level` | str | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |

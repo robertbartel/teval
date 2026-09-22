@@ -41,9 +41,8 @@ from teval.config import IOConfig, StatsConfig
 HYDROFABRIC_RESULT = (
     "gdf-sentinel", ["11111111"], {"11111111": [101]}, {"11111111": "nex-9001"},
 )
-FORMULATION_RESULT = (
-    "stats-sentinel", "members-sentinel", "t-min-sentinel", "t-max-sentinel",
-)
+FORMULATION_RESULT = ("stats-sentinel", "members-sentinel")
+TIME_BOUNDS_RESULT = ("t-min-sentinel", "t-max-sentinel")
 OBSERVATIONS_RESULT = "obs-sentinel"
 
 
@@ -87,6 +86,9 @@ def calls(monkeypatch):
         workflow, "_process_formulation_files", fake_process_formulations
     )
     monkeypatch.setattr(workflow, "fetch_observations", fake_fetch_observations)
+    monkeypatch.setattr(
+        workflow, "formulation_time_bounds", lambda formulation_dict: TIME_BOUNDS_RESULT
+    )
     return log
 
 
@@ -196,14 +198,12 @@ def test_only_the_hydrofabric_key_is_read_before_the_hydrofabric_loads(monkeypat
 
 def test_observations_still_take_their_window_from_the_formulations(domain_dict, calls):
     """
-    The one real ordering constraint that survives: the fetch window is the
-    time bounds the formulation step reported, which is why observations
-    cannot move up.
+    The fetch window is the time bounds the formulation files report.
     """
     workflow.load_domain_data(domain_dict, IOConfig(), StatsConfig())
 
     _name, (gage_ids, t_min, t_max, io), _kwargs = calls[2]
-    assert (t_min, t_max) == (FORMULATION_RESULT[2], FORMULATION_RESULT[3])
+    assert (t_min, t_max) == TIME_BOUNDS_RESULT
     assert isinstance(io, IOConfig)
     # ...and the gage list still merges the hydrofabric's gages with the
     # domain's own, which is the reason it cannot move up either.
@@ -222,16 +222,18 @@ def _load_domain_data_previous_order(domain_dict, io, stats_config):
     rather than against a restatement of the new code's behaviour.  Attribute
     lookups go through the ``workflow`` module so the same patches apply.
 
-    Tracks the previous *order*, not its signature: ``_process_formulation_files``
+    Tracks the previous *order*, not its signatures: ``_process_formulation_files``
     takes the weight plan the later wiring added, forwarded as the ``None``
-    these tests' ``StatsConfig()`` produces.
+    these tests' ``StatsConfig()`` produces, and the time bounds it used to
+    return now come from ``formulation_time_bounds``.
     """
     results = {}
 
     results['formulations'] = {'combined': None, 'ensemble_members': None}
-    ds_stats, ds_members, t_min, t_max = workflow._process_formulation_files(
+    ds_stats, ds_members = workflow._process_formulation_files(
         domain_dict['formulations'], stats_config, None
     )
+    t_min, t_max = workflow.formulation_time_bounds(domain_dict['formulations'])
 
     results['formulations']['combined'] = ds_stats
     results['formulations']['ensemble_members'] = ds_members

@@ -1,5 +1,7 @@
 """GIF animation of streamflow propagation through the river network."""
 
+import logging
+
 import numpy as np
 import pandas as pd
 import contextily as cx
@@ -16,6 +18,9 @@ import matplotlib.colors as mcolors
 
 from joblib import Parallel, delayed
 
+logger = logging.getLogger(__name__)
+
+
 def _render_frame(i, t, current_vals, gdf_sorted, cmap, norm, dynamic_lw, temp_dir, var_name, add_basemap):
     """Worker function to render a single animation frame."""
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -27,7 +32,10 @@ def _render_frame(i, t, current_vals, gdf_sorted, cmap, norm, dynamic_lw, temp_d
     gdf_frame.plot(column='val', ax=ax, cmap=cmap, norm=norm, linewidth=dynamic_lw, alpha=0.9)
     
     if add_basemap:
-        cx.add_basemap(ax, crs=gdf_sorted.crs, source=cx.providers.USGS.USTopo)
+        try:
+            cx.add_basemap(ax, crs=gdf_sorted.crs, source=cx.providers.USGS.USTopo)
+        except Exception as e:
+            logger.warning(f"Basemap unavailable: {e}")
     
     ax.set_axis_off()
     time_str = pd.to_datetime(t).strftime('%Y-%m-%d %H:%M')

@@ -50,6 +50,15 @@ class IOConfig(BaseModel):
             "streamflow data from USGS NWIS for all gages found in the hydrofabric."
         ),
     )
+    offline: bool = Field(
+        default=False,
+        description=(
+            "Run without network access, as on compute nodes that have none. "
+            "No USGS download is attempted and no basemap is drawn. Observations "
+            "must already be in observations_file (see --fetch); the run checks "
+            "this before processing and stops if they are not."
+        ),
+    )
     save_downloaded_obs: Optional[Path] = Field(
         default=None,
         description=(

@@ -3,6 +3,7 @@
 
 import pandas as pd
 import dataretrieval.nwis as nwis
+from dataretrieval.exceptions import NoSitesError
 from typing import List, Union, Optional
 
 # Conversion constant: CFS to CMS
@@ -43,7 +44,8 @@ def fetch_usgs_streamflow(
     start_date: str,
     end_date: str,
     to_cms: bool = True,
-    to_utc: bool = True
+    to_utc: bool = True,
+    raise_errors: bool = False,
 ) -> pd.DataFrame:
     """
     Fetches daily or instantaneous streamflow (parameter 00060) from USGS NWIS.
@@ -54,6 +56,8 @@ def fetch_usgs_streamflow(
         end_date: End date string (YYYY-MM-DD).
         to_cms: If True, converts from CFS to CMS.
         to_utc: If True, converts index to UTC timezone.
+        raise_errors: If True, a failed request raises instead of returning an
+            empty DataFrame.  NWIS finding no data is still an empty result.
         
     Returns:
         pd.DataFrame: Index is Datetime, Columns are site_ids. Values are flow.
@@ -77,6 +81,8 @@ def fetch_usgs_streamflow(
         )
     except Exception as e:
         # Sometimes dataretrieval fails if no data found
+        if raise_errors and not isinstance(e, NoSitesError):
+            raise
         print(f"Error fetching from NWIS: {e}")
         return pd.DataFrame()
 

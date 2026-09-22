@@ -8,6 +8,9 @@ Public API
 fetch_observations(gage_ids, t_min, t_max, io)
     Return a wide-format DataFrame of observed streamflow (m³/s) with
     datetime index and zero-padded 8-digit USGS gage ID columns.
+
+download_observations(gage_ids, t_min, t_max)
+    Download hourly USGS NWIS streamflow (m³/s) for the gages and period.
 """
 
 from __future__ import annotations
@@ -36,6 +39,36 @@ def _normalize_gage_id(g) -> str:
     return s.zfill(8) if len(s) <= 8 else s
 
 
+def download_observations(
+    gage_ids: List[str],
+    t_min: pd.Timestamp,
+    t_max: pd.Timestamp,
+    raise_errors: bool = False,
+) -> pd.DataFrame:
+    """
+    Download USGS NWIS streamflow for the gages over the dates spanning the period.
+
+    Only all-digit IDs are requested.  Returns hourly means in m^3/s on a UTC
+    index, interpolated across gaps; empty if nothing was requested or found.
+    With *raise_errors*, a failed request raises rather than returning empty.
+    """
+    clean_gages = [str(g) for g in gage_ids if str(g).isdigit()]
+    if not clean_gages:
+        return pd.DataFrame()
+
+    obs_df = usgs.fetch_usgs_streamflow(
+        clean_gages,
+        str(t_min.date()),
+        str(t_max.date()),
+        to_cms=True,
+        to_utc=True,
+        raise_errors=raise_errors,
+    )
+    if not obs_df.empty:
+        obs_df = obs_df.resample("1h").mean().interpolate()
+    return obs_df
+
+
 def fetch_observations(
     gage_ids: List[str],
     t_min: Optional[pd.Timestamp],
@@ -48,7 +81,8 @@ def fetch_observations(
     Priority
     --------
     1. Read from io.observations_file (Parquet or CSV) if it exists.
-    2. Fall back to the USGS NWIS API if io.auto_download_usgs is True.
+    2. Fall back to the USGS NWIS API if io.auto_download_usgs is True and
+       io.offline is not.
     3. Return an empty DataFrame and log a warning otherwise.
 
     Gage ID normalization
@@ -146,34 +180,21 @@ def fetch_observations(
         return obs_df
 
     # USGS API fallback
-    if io.auto_download_usgs:
-        clean_gages = [str(g) for g in gage_ids if str(g).isdigit()]
-        if not clean_gages:
-            return obs_df
-
+    if io.auto_download_usgs and not io.offline:
         logger.info("Fetching USGS data via API...")
-        obs_df = usgs.fetch_usgs_streamflow(
-            clean_gages,
-            str(t_min.date()),
-            str(t_max.date()),
-            to_cms=True,
-            to_utc=True,
-        )
+        obs_df = download_observations(gage_ids, t_min, t_max)
 
-        if not obs_df.empty:
-            obs_df = obs_df.resample("1h").mean().interpolate()
-
-            if io.save_downloaded_obs:
-                suffix = io.save_downloaded_obs.suffix
-                if suffix == ".csv":
-                    obs_df.to_csv(io.save_downloaded_obs)
-                elif suffix == ".parquet":
-                    obs_df.to_parquet(io.save_downloaded_obs)
-                else:
-                    logger.warning(f"Observation file type '{suffix}' not supported for saving.")
+        if not obs_df.empty and io.save_downloaded_obs:
+            suffix = io.save_downloaded_obs.suffix
+            if suffix == ".csv":
+                obs_df.to_csv(io.save_downloaded_obs)
+            elif suffix == ".parquet":
+                obs_df.to_parquet(io.save_downloaded_obs)
+            else:
+                logger.warning(f"Observation file type '{suffix}' not supported for saving.")
 
         return obs_df
 
     # Nothing available
-    logger.warning("No observation file provided and auto_download is disabled.")
+    logger.warning("No observation file provided and auto_download is disabled or the run is offline.")
     return obs_df

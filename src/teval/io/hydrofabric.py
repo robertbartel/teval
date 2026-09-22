@@ -9,6 +9,9 @@ load_hydrofabric(gpkg_path, gpkg_layer="flowpaths")
     Read a ``.gpkg`` file and return the flowpath GeoDataFrame together with
     the gage crosswalk structures needed downstream.
 
+read_gage_ids(gpkg_path, gpkg_layer="flowpaths")
+    Read only the gage IDs, without geometries, for planning downloads.
+
 build_nexus_crosswalk(gdf_hydro)
     Map each nexus to the feature ids draining to it, for weighting.
 
@@ -23,12 +26,93 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import geopandas as gpd
+import pyogrio
 import pandas as pd
 import numpy as np
 
 from teval.identifiers import as_identifiers
 
 logger = logging.getLogger(__name__)
+
+_FLOWPATH_COLUMNS = {
+    "id": ["id", "flowline_id", "flowpath_id"],
+    "toid": ["toid", "flowpath_toid"],
+    "hydroseq": ["hydroseq", "flowpath_hydroseq", "flowline_hydroseq"],
+    "order": ["order", "streamorder"],
+    "geometry": ["geometry"]
+}
+
+
+def _flowpath_columns(available_cols) -> Tuple[List[str], Dict[str, str]]:
+    """
+    Match the flowpath layer's columns to their standard names.
+
+    Returns the columns to keep and the renames to standard names.  A non-empty
+    rename means the v4.0 schema, whose gages live in the hydrolocations layer.
+    """
+    cols_to_keep = []
+    rename_dict = {}
+
+    for standard_name, possible_names in _FLOWPATH_COLUMNS.items():
+        match = next((col for col in possible_names if col in available_cols), None)
+        if match:
+            cols_to_keep.append(match)
+            if match != standard_name:
+                rename_dict[match] = standard_name
+        else:
+            raise KeyError(f"Could not find a valid column for '{standard_name}'. Checked: {possible_names}")
+    return cols_to_keep, rename_dict
+
+
+def _nwis_gages(hydrolocations: pd.DataFrame) -> pd.DataFrame:
+    """One row per NWIS gage in ``hl_reference``, its ID in a ``gage`` column."""
+    gages = hydrolocations.copy()
+    gages['hl_reference'] = gages['hl_reference'].str.split('|')
+    gages = gages.explode('hl_reference')
+    gages['hl_reference'] = gages['hl_reference'].str.strip()
+    gages[['type', 'gage_id']] = gages['hl_reference'].str.split('-', n=1, expand=True)
+    gages['type'] = gages['type'].str.strip()
+    gages['gage_id'] = gages['gage_id'].str.strip()
+    gages = gages[gages['type']=='nwis'].drop(columns=['hl_reference'])
+    return gages.rename(columns={'gage_id': 'gage'})
+
+
+def _network_gages(network: pd.DataFrame) -> pd.DataFrame:
+    """The network layer's gage rows, their ID in a ``gage`` column."""
+    gages = network[network["hl_uri"].str.startswith("gages-", na=False)].copy()
+    gages["gage"] = gages["hl_uri"].str.replace("gages-", "")
+    return gages
+
+
+def read_gage_ids(gpkg_path: Optional[Path], gpkg_layer: str = "flowpaths") -> List[str]:
+    """
+    Read the hydrofabric's gage IDs without loading any geometry.
+
+    A superset of the IDs ``load_hydrofabric`` returns: for the v4.0 schema it
+    keeps every NWIS gage in the hydrolocations layer, including any the full
+    crosswalk later drops.  Cheap enough to run on a login node.
+    """
+    if not gpkg_path:
+        return []
+
+    # read_info lists attribute fields only; geometry is always present
+    fields = [*pyogrio.read_info(gpkg_path, layer=gpkg_layer)["fields"], "geometry"]
+    _, rename_dict = _flowpath_columns(fields)
+
+    if rename_dict:
+        hydrolocations = gpd.read_file(
+            gpkg_path, layer="hydrolocations",
+            columns=["hl_class", "hl_reference", "flowpath_id"], ignore_geometry=True,
+        )
+        hydrolocations = hydrolocations[hydrolocations['hl_class']=='gage']
+        gages = _nwis_gages(hydrolocations.dropna(subset='flowpath_id'))
+    else:
+        network = gpd.read_file(
+            gpkg_path, layer="network", columns=["hl_uri"], ignore_geometry=True
+        )
+        gages = _network_gages(network)
+
+    return sorted(gages["gage"].unique())
 
 
 def load_hydrofabric(
@@ -72,27 +156,8 @@ def load_hydrofabric(
 
     # Flowpaths
     flowpaths = gpd.read_file(gpkg_path, layer=gpkg_layer)
-    available_cols = flowpaths.columns
-    col_mappings = {
-        "id": ["id", "flowline_id", "flowpath_id"],
-        "toid": ["toid", "flowpath_toid"],
-        "hydroseq": ["hydroseq", "flowpath_hydroseq", "flowline_hydroseq"], 
-        "order": ["order", "streamorder"],
-        "geometry": ["geometry"]
-    }
+    cols_to_keep, rename_dict = _flowpath_columns(flowpaths.columns)
 
-    cols_to_keep = []
-    rename_dict = {}
-
-    for standard_name, possible_names in col_mappings.items():
-        match = next((col for col in possible_names if col in available_cols), None)
-        if match:
-            cols_to_keep.append(match)
-            if match != standard_name:
-                rename_dict[match] = standard_name
-        else:
-            raise KeyError(f"Could not find a valid column for '{standard_name}'. Checked: {possible_names}")
-    
     fp_outlet_fl_df = pd.DataFrame()
     if 'flowline_id' in cols_to_keep:
         cols_to_keep.append('flowpath_id')
@@ -132,16 +197,9 @@ def load_hydrofabric(
     if rename_dict:
         hydrolocations = gpd.read_file(gpkg_path, layer='hydrolocations')
         hydrolocations = hydrolocations[hydrolocations['hl_class']=='gage'][['flowpath_id','hl_reference']].drop_duplicates().dropna(subset='flowpath_id')
-        gages_net = pd.merge(hydrolocations, flowpaths[['flowpath_id','toid']].reset_index(), on='flowpath_id')
-        gages_net['hl_reference'] = gages_net['hl_reference'].str.split('|')
-        exploded_gages = gages_net.explode('hl_reference')
-        exploded_gages['hl_reference'] = exploded_gages['hl_reference'].str.strip()
-        gages_net = exploded_gages.copy()
-        gages_net[['type', 'gage_id']] = gages_net['hl_reference'].str.split('-', n=1, expand=True)
-        gages_net['type'] = gages_net['type'].str.strip()
-        gages_net['gage_id'] = gages_net['gage_id'].str.strip()
-        gages_net = gages_net[gages_net['type']=='nwis'].drop(columns=['hl_reference'])
-        gages_net.rename(columns={'gage_id': 'gage'}, inplace=True)
+        gages_net = _nwis_gages(
+            pd.merge(hydrolocations, flowpaths[['flowpath_id','toid']].reset_index(), on='flowpath_id')
+        )
         
         #TODO: Test that this works with an updated hydrofabric
         if not fp_outlet_fl_df.empty:
@@ -150,9 +208,7 @@ def load_hydrofabric(
         
 
     else:
-        network = gpd.read_file(gpkg_path, layer="network")
-        gages_net = network[network["hl_uri"].str.startswith("gages-", na=False)].copy()
-        gages_net["gage"] = gages_net["hl_uri"].str.replace("gages-", "")
+        gages_net = _network_gages(gpd.read_file(gpkg_path, layer="network"))
     
     if not gages_net.empty:
         # Nexus ID

@@ -95,6 +95,38 @@ def reuses_precomputed_ensemble(formulation_dict: Dict) -> bool:
     return True
 
 
+def formulation_time_bounds(formulation_dict: Dict) -> tuple:
+    """
+    Return the first and last time the domain's formulation files report.
+
+    A pre-computed ensemble with a time coordinate decides it; otherwise the
+    raw files do, spanning all of them as their combined dataset would.  Reads
+    time coordinates only, so ``--fetch`` can ask it without loading data.
+    ``(None, None)`` when no file reports a time.
+    """
+    if reuses_precomputed_ensemble(formulation_dict):
+        with xr.open_dataset(formulation_dict["ensemble_file"], engine="h5netcdf") as ds:
+            if 'time' in ds.coords:
+                return pd.to_datetime(ds.time.min().values), pd.to_datetime(ds.time.max().values)
+
+    starts, ends = [], []
+    for path in formulation_dict.get("raw_files", {}).values():
+        with xr.open_dataset(path, engine="h5netcdf") as ds:
+            starts.append(ds.time.min().values)
+            ends.append(ds.time.max().values)
+    if not starts:
+        return None, None
+    return pd.to_datetime(min(starts)), pd.to_datetime(max(ends))
+
+
+def domain_gage_ids(domain_dict: Dict, hydrofabric_gage_ids: List[str]) -> List[str]:
+    """The gages to observe for a domain: its hydrofabric gages plus its own name."""
+    initial_gages = [
+        g for g in domain_dict.get('gage_obs', {}).get('domain_name', []) if g != "CONUS"
+    ]
+    return list(set(initial_gages + hydrofabric_gage_ids))
+
+
 # Functions for loading domain data based on the domain map created in initialize_domains
 def load_domain_data(domain_dict: Dict, io: IOConfig, stats_config: StatsConfig) -> Dict:
     """
@@ -142,17 +174,16 @@ def load_domain_data(domain_dict: Dict, io: IOConfig, stats_config: StatsConfig)
 
     # Process Formulations
     results['formulations'] = {'combined': None, 'ensemble_members': None}
-    ds_stats, ds_members, t_min, t_max = _process_formulation_files(domain_dict['formulations'], stats_config, weight_plan)
+    ds_stats, ds_members = _process_formulation_files(domain_dict['formulations'], stats_config, weight_plan)
 
     results['formulations']['combined'] = ds_stats
     results['formulations']['ensemble_members'] = ds_members
 
-    initial_gages = domain_dict.get('gage_obs', {}).get('domain_name', [])
-    if "CONUS" in initial_gages: initial_gages.remove("CONUS")
-    gage_ids = list(set(initial_gages + all_gage_ids))
-    
     # Fetch/Load Observations
-    results['gage_obs'] = fetch_observations(gage_ids, t_min, t_max, io)
+    t_min, t_max = formulation_time_bounds(domain_dict['formulations'])
+    results['gage_obs'] = fetch_observations(
+        domain_gage_ids(domain_dict, all_gage_ids), t_min, t_max, io
+    )
 
     return results
 
@@ -185,7 +216,6 @@ def _process_formulation_files(
     
     ds_stats = None
     combined_ds = None
-    t_min, t_max = None, None
 
     # Load Pre-Computed Ensemble (if it exists)
     if reuses_precomputed_ensemble(formulation_dict):
@@ -206,10 +236,6 @@ def _process_formulation_files(
                 f"rebuild the statistics with these weights."
             )
 
-        if 'time' in ds_stats.coords:
-            t_min = pd.to_datetime(ds_stats.time.min().values)
-            t_max = pd.to_datetime(ds_stats.time.max().values)
-
     # Load Raw Formulation Files (if they exist)
     if raw_files:
         logger.debug(f"Loading {len(raw_files)} raw formulation files (strategy=mfdataset)...")
@@ -226,10 +252,6 @@ def _process_formulation_files(
         # Assign coordinates properly
         combined_ds = combined_ds.assign_coords(formulation=list(raw_files.keys()))
 
-        if t_min is None:
-            t_min = pd.to_datetime(combined_ds.time.min().values)
-            t_max = pd.to_datetime(combined_ds.time.max().values)
-
     # Calculate Stats
     if ds_stats is None and combined_ds is not None:
         weights, applied = (
@@ -245,7 +267,7 @@ def _process_formulation_files(
     elif ds_stats is None and combined_ds is None:
         raise ValueError("No ensemble file or raw formulation files found to process.")
         
-    return ds_stats, combined_ds, t_min, t_max
+    return ds_stats, combined_ds
 
 # Functions for calculating metrics based on the loaded domain data
 def _calc_row(sim_series: pd.Series, obs_series: pd.Series, source_name: str, 
@@ -567,6 +589,6 @@ def produce_domain_specific_visualizations(
                 output_path=str(out_gif),
                 var_name=viz.animation.variable,
                 fps=viz.animation.fps,
-                add_basemap=True,
+                add_basemap=not io.offline,
                 n_workers=n_workers
             )
