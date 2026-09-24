@@ -1,13 +1,23 @@
-"""NWIS requests are chunked by site, and ``raise_errors`` tells a failed
-request apart from one that found nothing."""
+"""NWIS requests are chunked by site, transient failures are retried, and
+``raise_errors`` tells a failed request apart from one that found nothing."""
 
 from __future__ import annotations
 
 import pandas as pd
 import pytest
-from dataretrieval.exceptions import NetworkError, NoSitesError
+from dataretrieval.exceptions import (
+    HTTPError, NetworkError, NoSitesError, ServiceUnavailable, URLTooLong,
+)
 
 from teval.obs import usgs
+
+
+@pytest.fixture(autouse=True)
+def sleeps(monkeypatch):
+    """Records each wait instead of sleeping through it."""
+    waits = []
+    monkeypatch.setattr(usgs.time, "sleep", waits.append)
+    return waits
 
 
 def _get_record_raising(error):
@@ -152,3 +162,80 @@ def test_a_failed_chunk_is_left_out_by_default(monkeypatch):
     )
 
     assert list(df.columns) == ["01010101"]
+
+
+def _unavailable():
+    return ServiceUnavailable("HTTP 503", status_code=503)
+
+
+class _FailingFirst:
+    """Raises each of ``errors`` in turn, then answers like NWIS."""
+
+    def __init__(self, *errors):
+        self.errors = list(errors)
+        self.calls = 0
+
+    def __call__(self, sites):
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return _one_time_record(sites)
+
+
+def test_a_transient_failure_is_retried_after_waiting(monkeypatch, sleeps):
+    respond = _FailingFirst(_unavailable(), NetworkError("reset"))
+    monkeypatch.setattr(usgs.nwis, "get_record", _RecordingGetRecord(respond))
+
+    df = usgs.fetch_usgs_streamflow(["01010101"], "2020-06-01", "2020-06-02", raise_errors=True)
+
+    assert list(df.columns) == ["01010101"]
+    assert respond.calls == 3
+    assert sleeps == list(usgs.RETRY_WAITS_SECONDS[:2])
+
+
+def test_a_lasting_transient_failure_raises_after_the_last_retry(monkeypatch, sleeps):
+    respond = _FailingFirst(*(_unavailable() for _ in range(10)))
+    monkeypatch.setattr(usgs.nwis, "get_record", _RecordingGetRecord(respond))
+
+    with pytest.raises(ServiceUnavailable):
+        usgs.fetch_usgs_streamflow(["01010101"], "2020-06-01", "2020-06-02", raise_errors=True)
+
+    assert respond.calls == len(usgs.RETRY_WAITS_SECONDS) + 1
+    assert sleeps == list(usgs.RETRY_WAITS_SECONDS)
+
+
+def test_a_lasting_transient_failure_is_left_out_by_default(monkeypatch):
+    def respond(sites):
+        if sites == ["02020202"]:
+            raise _unavailable()
+        return _one_time_record(sites)
+    monkeypatch.setattr(usgs.nwis, "get_record", _RecordingGetRecord(respond))
+
+    df = usgs.fetch_usgs_streamflow(
+        ["01010101", "02020202"], "2020-06-01", "2020-06-02", chunk_size=1
+    )
+
+    assert list(df.columns) == ["01010101"]
+
+
+@pytest.mark.parametrize("error", [
+    NoSitesError("url"), URLTooLong("too long"), HTTPError("HTTP 400", status_code=400),
+], ids=["no-sites", "url-too-long", "bad-request"])
+def test_a_lasting_failure_is_not_retried(monkeypatch, sleeps, error):
+    respond = _FailingFirst(error)
+    monkeypatch.setattr(usgs.nwis, "get_record", _RecordingGetRecord(respond))
+
+    usgs.fetch_usgs_streamflow(["01010101"], "2020-06-01", "2020-06-02")
+
+    assert respond.calls == 1
+    assert sleeps == []
+
+
+def test_requests_are_paused_between(monkeypatch, sleeps):
+    monkeypatch.setattr(usgs.nwis, "get_record", _RecordingGetRecord(_one_time_record))
+
+    usgs.fetch_usgs_streamflow(
+        ["01010101", "02020202", "03030303"], "2020-06-01", "2020-06-02", chunk_size=1
+    )
+
+    assert sleeps == [usgs.PAUSE_BETWEEN_REQUESTS_SECONDS] * 2

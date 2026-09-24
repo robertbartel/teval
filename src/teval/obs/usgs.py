@@ -1,9 +1,11 @@
 """USGS NWIS streamflow data retrieval utilities."""
 
 
+import time
+
 import pandas as pd
 import dataretrieval.nwis as nwis
-from dataretrieval.exceptions import NoSitesError
+from dataretrieval.exceptions import NetworkError, NoSitesError, TransientError
 from typing import List, Union, Optional
 
 # Conversion constant: CFS to CMS
@@ -13,6 +15,14 @@ CFS_TO_CMS = 0.028316847
 # request, and one request for every gage in a CONUS hydrofabric is rejected
 # as too long before it is sent.
 MAX_SITES_PER_REQUEST = 100
+
+# Seconds to wait before each further attempt at a request that failed
+# transiently (429, 5xx, no connection).  dataretrieval's own retries give up
+# within seconds, while NWIS 503 bursts can last longer.
+RETRY_WAITS_SECONDS = (30, 60, 120)
+
+# Seconds between requests, so a CONUS fetch does not provoke throttling.
+PAUSE_BETWEEN_REQUESTS_SECONDS = 1
 
 def find_gages_in_domain(min_x: float, min_y: float, max_x: float, max_y: float) -> pd.DataFrame:
     """
@@ -48,7 +58,7 @@ def _fetch_record(
     site_ids: List[str], start_date: str, end_date: str, raise_errors: bool
 ) -> Optional[pd.DataFrame]:
     """Makes one NWIS 'iv' request; returns None if it fails without raising."""
-    try:
+    def get_record():
         return nwis.get_record(
             sites=site_ids,
             service='iv',
@@ -56,6 +66,15 @@ def _fetch_record(
             end=end_date,
             parameterCd='00060'
         )
+
+    try:
+        for wait in RETRY_WAITS_SECONDS:
+            try:
+                return get_record()
+            except (TransientError, NetworkError) as e:
+                print(f"NWIS request for {len(site_ids)} sites failed, retrying in {wait}s: {e}")
+            time.sleep(wait)
+        return get_record()
     except Exception as e:
         # Sometimes dataretrieval fails if no data found
         if raise_errors and not isinstance(e, NoSitesError):
@@ -84,8 +103,9 @@ def fetch_usgs_streamflow(
         to_cms: If True, converts from CFS to CMS.
         to_utc: If True, converts index to UTC timezone.
         raise_errors: If True, a failed request raises instead of being
-            skipped, which leaves its sites out of the result.  NWIS finding
-            no data is still an empty result.
+            skipped, which leaves its sites out of the result.  A transient
+            failure only counts once its retries (``RETRY_WAITS_SECONDS``) run
+            out.  NWIS finding no data is still an empty result.
         chunk_size: Maximum number of sites in one NWIS request.
 
     Returns:
@@ -106,6 +126,8 @@ def fetch_usgs_streamflow(
 
     records = []
     for i in range(0, len(site_ids), chunk_size):
+        if i:
+            time.sleep(PAUSE_BETWEEN_REQUESTS_SECONDS)
         record = _fetch_record(site_ids[i:i + chunk_size], start_date, end_date, raise_errors)
         if record is not None and not record.empty:
             records.append(record)
