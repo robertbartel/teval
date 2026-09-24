@@ -9,6 +9,11 @@ from typing import List, Union, Optional
 # Conversion constant: CFS to CMS
 CFS_TO_CMS = 0.028316847
 
+# Sites per NWIS request.  USGS water services take at most 100 sites per
+# request, and one request for every gage in a CONUS hydrofabric is rejected
+# as too long before it is sent.
+MAX_SITES_PER_REQUEST = 100
+
 def find_gages_in_domain(min_x: float, min_y: float, max_x: float, max_y: float) -> pd.DataFrame:
     """
     Queries USGS NWIS for stream gages within a bounding box.
@@ -39,6 +44,25 @@ def find_gages_in_domain(min_x: float, min_y: float, max_x: float, max_y: float)
     print(f"Found {len(sites_df)} gages.")
     return sites_df
 
+def _fetch_record(
+    site_ids: List[str], start_date: str, end_date: str, raise_errors: bool
+) -> Optional[pd.DataFrame]:
+    """Makes one NWIS 'iv' request; returns None if it fails without raising."""
+    try:
+        return nwis.get_record(
+            sites=site_ids,
+            service='iv',
+            start=start_date,
+            end=end_date,
+            parameterCd='00060'
+        )
+    except Exception as e:
+        # Sometimes dataretrieval fails if no data found
+        if raise_errors and not isinstance(e, NoSitesError):
+            raise
+        print(f"Error fetching {len(site_ids)} sites from NWIS: {e}")
+        return None
+
 def fetch_usgs_streamflow(
     site_ids: List[str],
     start_date: str,
@@ -46,19 +70,24 @@ def fetch_usgs_streamflow(
     to_cms: bool = True,
     to_utc: bool = True,
     raise_errors: bool = False,
+    chunk_size: int = MAX_SITES_PER_REQUEST,
 ) -> pd.DataFrame:
     """
     Fetches daily or instantaneous streamflow (parameter 00060) from USGS NWIS.
-    
+
+    Sites are requested ``chunk_size`` at a time and the results merged.
+
     Args:
         site_ids: List of USGS gage IDs (strings, e.g. ["01111500"]).
         start_date: Start date string (YYYY-MM-DD).
         end_date: End date string (YYYY-MM-DD).
         to_cms: If True, converts from CFS to CMS.
         to_utc: If True, converts index to UTC timezone.
-        raise_errors: If True, a failed request raises instead of returning an
-            empty DataFrame.  NWIS finding no data is still an empty result.
-        
+        raise_errors: If True, a failed request raises instead of being
+            skipped, which leaves its sites out of the result.  NWIS finding
+            no data is still an empty result.
+        chunk_size: Maximum number of sites in one NWIS request.
+
     Returns:
         pd.DataFrame: Index is Datetime, Columns are site_ids. Values are flow.
     """
@@ -70,25 +99,22 @@ def fetch_usgs_streamflow(
     
     if isinstance(site_ids, str):
         site_ids = [site_ids]
-    
-    try:
-        df_flow = nwis.get_record(
-            sites=site_ids, 
-            service='iv', 
-            start=start_date, 
-            end=end_date, 
-            parameterCd='00060'
-        )
-    except Exception as e:
-        # Sometimes dataretrieval fails if no data found
-        if raise_errors and not isinstance(e, NoSitesError):
-            raise
-        print(f"Error fetching from NWIS: {e}")
-        return pd.DataFrame()
+    if chunk_size < 1:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    # Distinct chunks keep a site from appearing in two responses.
+    site_ids = list(dict.fromkeys(site_ids))
 
-    if df_flow is None or df_flow.empty:
+    records = []
+    for i in range(0, len(site_ids), chunk_size):
+        record = _fetch_record(site_ids[i:i + chunk_size], start_date, end_date, raise_errors)
+        if record is not None and not record.empty:
+            records.append(record)
+
+    if not records:
         print("Warning: No USGS data returned for these sites/dates.")
         return pd.DataFrame()
+
+    df_flow = pd.concat(records)
 
     # Clean up the DataFrame
     # 1. Reset index to ensure site_no and datetime are accessible columns
