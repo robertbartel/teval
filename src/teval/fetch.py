@@ -11,7 +11,7 @@ offline run draws no basemaps instead.
 Public API
 ----------
 plan_observations(config)
-    One request per domain that needs observations: its gages and dates.
+    One request per domain that needs observations: its gages and period.
 
 fetch(config)
     Download every planned request into ``io.observations_file``, unless the
@@ -20,6 +20,9 @@ fetch(config)
 offline_problems(config)
     Why an offline run of this configuration would lack observations; empty if
     it would not.
+
+RECORD_VERSION
+    The version of the record ``fetch`` writes beside the observations.
 """
 
 from __future__ import annotations
@@ -27,7 +30,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -41,30 +43,41 @@ from teval.workflow import domain_gage_ids, formulation_time_bounds
 
 logger = logging.getLogger(__name__)
 
+# A record of any other version covers nothing.  Unversioned records held
+# dates, which NWIS read as local midnight at each gage, so their observations
+# lack the first hours of each period.
+RECORD_VERSION = 2
+
 
 @dataclass(frozen=True)
 class ObservationRequest:
-    """The gages a domain observes and the dates its formulation files span."""
+    """The gages a domain observes and the period its formulation files span.
+
+    ``start`` and ``end`` are naive UTC timestamps, as t-route's are.
+    """
 
     domain: str
     gages: Tuple[str, ...]
-    start: date
-    end: date
+    start: pd.Timestamp
+    end: pd.Timestamp
 
     def covered_by(self, other: ObservationRequest) -> bool:
-        """Whether *other* asked for all of these gages over all of these dates."""
+        """Whether *other* asked for all of these gages over all of this period."""
         return (
             set(self.gages) <= set(other.gages)
             and other.start <= self.start
             and self.end <= other.end
         )
 
+    def describe_period(self) -> str:
+        return f"{self.start:%Y-%m-%d %H:%M} -> {self.end:%Y-%m-%d %H:%M} UTC"
+
     def to_json(self) -> dict:
         return {
             "domain": self.domain,
             "gages": list(self.gages),
-            "start": self.start.isoformat(),
-            "end": self.end.isoformat(),
+            "start": self.start.isoformat() + "Z",
+            "end": self.end.isoformat() + "Z",
         }
 
     @classmethod
@@ -72,8 +85,8 @@ class ObservationRequest:
         return cls(
             domain=data["domain"],
             gages=tuple(data["gages"]),
-            start=date.fromisoformat(data["start"]),
-            end=date.fromisoformat(data["end"]),
+            start=pd.Timestamp(data["start"]).tz_localize(None),
+            end=pd.Timestamp(data["end"]).tz_localize(None),
         )
 
 
@@ -100,7 +113,7 @@ def plan_observations(config: TevalConfig) -> List[ObservationRequest]:
         t_min, t_max = formulation_time_bounds(entry["formulations"])
         if gages and t_min is not None:
             requests.append(
-                ObservationRequest(domain_name, tuple(gages), t_min.date(), t_max.date())
+                ObservationRequest(domain_name, tuple(gages), t_min, t_max)
             )
     return requests
 
@@ -111,11 +124,21 @@ def _record_path(observations_file: Path) -> Path:
 
 
 def _recorded_requests(observations_file: Path) -> Optional[List[ObservationRequest]]:
-    """What ``fetch`` requested for this file, or None if it did not write it."""
+    """
+    What ``fetch`` requested for this file: None if it did not write it, empty
+    if its record is not of ``RECORD_VERSION``.
+    """
     record = _record_path(observations_file)
     if not (observations_file.exists() and record.exists()):
         return None
     data = json.loads(record.read_text())
+    if data.get("version") != RECORD_VERSION:
+        logger.warning(
+            f"{record} was written by another version of teval --fetch, so "
+            f"{observations_file} counts as holding no observations. Older "
+            "versions left out the first hours of each period."
+        )
+        return []
     return [ObservationRequest.from_json(r) for r in data["requests"]]
 
 
@@ -172,13 +195,10 @@ def fetch(config: TevalConfig) -> None:
     for request in plan:
         logger.info(
             f"[{request.domain}] Downloading {len(request.gages)} gage(s), "
-            f"{request.start} -> {request.end}"
+            f"{request.describe_period()}"
         )
         downloaded = download_observations(
-            list(request.gages),
-            pd.Timestamp(request.start),
-            pd.Timestamp(request.end),
-            raise_errors=True,
+            list(request.gages), request.start, request.end, raise_errors=True
         )
         obs_df = obs_df.combine_first(downloaded)
 
@@ -189,7 +209,9 @@ def fetch(config: TevalConfig) -> None:
     else:
         obs_df.to_parquet(observations_file)
     _record_path(observations_file).write_text(
-        json.dumps({"requests": [r.to_json() for r in plan]}, indent=2)
+        json.dumps(
+            {"version": RECORD_VERSION, "requests": [r.to_json() for r in plan]}, indent=2
+        )
     )
     logger.info(f"Observations for {len(obs_df.columns)} gage(s) saved -> {observations_file}")
 
@@ -216,6 +238,6 @@ def offline_problems(config: TevalConfig) -> List[str]:
         return []
     return [
         f"[{r.domain}] {observations_file} lacks observations for "
-        f"{len(r.gages)} gage(s), {r.start} -> {r.end}."
+        f"{len(r.gages)} gage(s), {r.describe_period()}."
         for r in _uncovered(plan, recorded)
     ]

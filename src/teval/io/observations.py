@@ -39,6 +39,11 @@ def _normalize_gage_id(g) -> str:
     return s.zfill(8) if len(s) <= 8 else s
 
 
+# How far beyond each end of the period observations are requested, so the
+# hourly means at its ends average whole hours and interpolation reaches them.
+DOWNLOAD_PADDING = pd.Timedelta(hours=1)
+
+
 def download_observations(
     gage_ids: List[str],
     t_min: pd.Timestamp,
@@ -46,7 +51,12 @@ def download_observations(
     raise_errors: bool = False,
 ) -> pd.DataFrame:
     """
-    Download USGS NWIS streamflow for the gages over the dates spanning the period.
+    Download USGS NWIS streamflow for the gages over the period.
+
+    *t_min* and *t_max* are naive UTC, as t-route's time coordinates are.
+    NWIS is asked for the whole hours spanning them, padded by
+    ``DOWNLOAD_PADDING``, as exact UTC times; given dates, NWIS would start at
+    local midnight at each gage, hours into the UTC day.
 
     Only all-digit IDs are requested.  Returns hourly means in m^3/s on a UTC
     index, interpolated across gaps; empty if nothing was requested or found.
@@ -58,8 +68,8 @@ def download_observations(
 
     obs_df = usgs.fetch_usgs_streamflow(
         clean_gages,
-        str(t_min.date()),
-        str(t_max.date()),
+        f"{t_min.floor('h') - DOWNLOAD_PADDING:%Y-%m-%dT%H:%MZ}",
+        f"{t_max.ceil('h') + DOWNLOAD_PADDING:%Y-%m-%dT%H:%MZ}",
         to_cms=True,
         to_utc=True,
         raise_errors=raise_errors,

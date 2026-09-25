@@ -32,7 +32,7 @@ Download observations first, where there is network access (a login node), with 
 python -m teval -c teval_config_conus.yaml --fetch
 ```
 
-This writes everything the run needs to `io.observations_file`, with a record of what was requested beside it (`<file>.fetch.json`). Re-running it downloads nothing unless the config now needs more gages or a longer period. It reads only gage IDs and time coordinates, so it is light enough for a login node.
+This writes everything the run needs to `io.observations_file`, with a record of what was requested beside it (`<file>.fetch.json`). Re-running it downloads nothing unless the config now needs more gages or a longer period, or the record was written by an older teval, whose downloads missed the first hours of each period. It reads only gage IDs and time coordinates, so it is light enough for a login node.
 
 Then set `io.offline: true` for the Slurm job. The run makes no network calls, draws maps without basemaps, and stops at startup if the observations it needs are not in `io.observations_file`.
 

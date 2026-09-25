@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import date
 
 import dask
 import numpy as np
@@ -31,10 +30,10 @@ FEATURE_IDS = [101, 201]
 TIMES = pd.date_range("2020-06-01", periods=4, freq="h")
 
 
-def _write_troute_outputs(troute_dir, times=TIMES):
-    for name in ("cfe", "noahowp"):
+def _write_troute_outputs(troute_dir, times=TIMES, names=("cfe", "noahowp")):
+    for name in names:
         run_dir = troute_dir / f"{name}_{DOMAIN}_output"
-        run_dir.mkdir(parents=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
         xr.Dataset(
             {"streamflow": (("time", "feature_id"), np.ones((len(times), len(FEATURE_IDS))))},
             coords={"time": times, "feature_id": FEATURE_IDS},
@@ -74,6 +73,10 @@ def config(run_dir):
     return TevalConfig(**_config_dict(run_dir, run_dir / "obs" / "obs.parquet"))
 
 
+def _record_path(config):
+    return config.io.observations_file.with_name("obs.parquet.fetch.json")
+
+
 @pytest.fixture
 def downloads(monkeypatch):
     """Stub the NWIS download; record each call and return a frame for it."""
@@ -81,7 +84,7 @@ def downloads(monkeypatch):
 
     def download(gage_ids, t_min, t_max, raise_errors=False):
         calls.append((list(gage_ids), t_min, t_max, raise_errors))
-        index = pd.date_range(t_min, t_max + pd.Timedelta(hours=23), freq="h", tz="UTC")
+        index = pd.date_range(t_min, t_max, freq="h", tz="UTC")
         return pd.DataFrame({g: 1.5 for g in gage_ids}, index=index)
 
     monkeypatch.setattr(tfetch, "download_observations", download)
@@ -91,9 +94,9 @@ def downloads(monkeypatch):
 # --------------------------------------------------------------------- #
 # The plan                                                              #
 # --------------------------------------------------------------------- #
-def test_each_observing_domain_is_planned_over_its_files_dates(config):
+def test_each_observing_domain_is_planned_over_its_files_times(config):
     assert tfetch.plan_observations(config) == [
-        tfetch.ObservationRequest(DOMAIN, (DOMAIN,), date(2020, 6, 1), date(2020, 6, 1))
+        tfetch.ObservationRequest(DOMAIN, (DOMAIN,), TIMES[0], TIMES[-1])
     ]
 
 
@@ -144,15 +147,74 @@ def test_a_gage_nwis_has_no_data_for_still_counts_as_fetched(config, monkeypatch
 def test_a_longer_window_is_fetched_again(run_dir, config, downloads):
     tfetch.fetch(config)
     later = pd.date_range("2020-07-01", periods=4, freq="h")
-    xr.Dataset(
-        {"streamflow": (("time", "feature_id"), np.ones((4, len(FEATURE_IDS))))},
-        coords={"time": later, "feature_id": FEATURE_IDS},
-    ).to_netcdf(run_dir / "troute" / f"cfe_{DOMAIN}_output" / "troute_output.nc", engine="h5netcdf")
+    _write_troute_outputs(run_dir / "troute", later, names=("cfe",))
 
     tfetch.fetch(config)
 
     assert len(downloads) == 2
-    assert downloads[1][1:3] == (pd.Timestamp("2020-06-01"), pd.Timestamp("2020-07-01"))
+    assert downloads[1][1:3] == (TIMES[0], later[-1])
+
+
+def test_an_earlier_start_on_the_same_day_is_fetched_again(run_dir, config, downloads):
+    _write_troute_outputs(run_dir / "troute", TIMES[2:])
+    tfetch.fetch(config)
+    _write_troute_outputs(run_dir / "troute", TIMES, names=("cfe",))
+
+    tfetch.fetch(config)
+
+    assert len(downloads) == 2
+    assert downloads[0][1] == TIMES[2]
+    assert downloads[1][1:3] == (TIMES[0], TIMES[-1])
+
+
+def test_the_record_keeps_times_and_their_version(config, downloads):
+    tfetch.fetch(config)
+
+    record = json.loads(_record_path(config).read_text())
+    assert record["version"] == tfetch.RECORD_VERSION
+    assert record["requests"][0]["start"] == "2020-06-01T00:00:00Z"
+    assert record["requests"][0]["end"] == "2020-06-01T03:00:00Z"
+
+
+def _write_date_only_record(config):
+    """A record as --fetch wrote it before RECORD_VERSION: no version, dates only."""
+    _record_path(config).write_text(json.dumps({
+        "requests": [
+            {"domain": DOMAIN, "gages": [DOMAIN], "start": "2020-06-01", "end": "2020-06-01"}
+        ]
+    }))
+
+
+def test_observations_fetched_under_a_date_only_record_are_fetched_again(config, downloads):
+    tfetch.fetch(config)
+    _write_date_only_record(config)
+
+    tfetch.fetch(config)
+
+    assert len(downloads) == 2
+    assert json.loads(_record_path(config).read_text())["version"] == tfetch.RECORD_VERSION
+
+
+def test_a_record_round_trips_and_covers_its_request():
+    request = tfetch.ObservationRequest(
+        DOMAIN, (DOMAIN,), pd.Timestamp("2020-06-01 01:30"), pd.Timestamp("2020-06-02 23:00")
+    )
+
+    restored = tfetch.ObservationRequest.from_json(json.loads(json.dumps(request.to_json())))
+
+    assert restored == request
+    assert request.covered_by(restored)
+
+
+def test_a_request_is_not_covered_by_one_starting_later_that_day():
+    request = tfetch.ObservationRequest(
+        DOMAIN, (DOMAIN,), pd.Timestamp("2020-06-01 01:00"), pd.Timestamp("2020-06-01 03:00")
+    )
+    later = tfetch.ObservationRequest(
+        DOMAIN, (DOMAIN,), pd.Timestamp("2020-06-01 02:00"), pd.Timestamp("2020-06-01 03:00")
+    )
+
+    assert not request.covered_by(later)
 
 
 def test_an_observations_file_fetch_did_not_write_is_left_alone(config, downloads):
@@ -199,10 +261,22 @@ def test_offline_is_ready_after_a_fetch(config, downloads):
 
 def test_offline_names_a_domain_the_fetch_did_not_cover(config, downloads):
     tfetch.fetch(config)
-    record = config.io.observations_file.with_name("obs.parquet.fetch.json")
-    record.write_text(json.dumps({"requests": []}))
+    _record_path(config).write_text(
+        json.dumps({"version": tfetch.RECORD_VERSION, "requests": []})
+    )
 
     assert tfetch.offline_problems(config)[0].startswith(f"[{DOMAIN}]")
+
+
+def test_offline_does_not_trust_a_date_only_record(config, downloads):
+    tfetch.fetch(config)
+    _write_date_only_record(config)
+
+    problems = tfetch.offline_problems(config)
+
+    assert len(problems) == 1
+    assert problems[0].startswith(f"[{DOMAIN}]")
+    assert "2020-06-01 00:00 -> 2020-06-01 03:00 UTC" in problems[0]
 
 
 def test_offline_trusts_an_observations_file_fetch_did_not_write(config):

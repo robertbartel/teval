@@ -98,8 +98,10 @@ def fetch_usgs_streamflow(
 
     Args:
         site_ids: List of USGS gage IDs (strings, e.g. ["01111500"]).
-        start_date: Start date string (YYYY-MM-DD).
-        end_date: End date string (YYYY-MM-DD).
+        start_date: Start of the period, as NWIS takes it: a time with its
+            offset (e.g. ``2020-06-01T00:00Z``), or a date (``YYYY-MM-DD``),
+            which NWIS reads as midnight local time at each site.
+        end_date: End of the period, in the same form.
         to_cms: If True, converts from CFS to CMS.
         to_utc: If True, converts index to UTC timezone.
         raise_errors: If True, a failed request raises instead of being
