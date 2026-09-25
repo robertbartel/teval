@@ -20,7 +20,7 @@ import yaml
 from teval import __main__ as teval_main
 from teval import fetch as tfetch
 from teval.config import TevalConfig
-from teval.io import observations
+from teval.io import initialize_domains, observations
 from teval.io.observations import fetch_observations
 
 DOMAIN = "02020202"
@@ -71,6 +71,14 @@ def config(run_dir):
     return TevalConfig(**_config_dict(run_dir, run_dir / "obs" / "obs.parquet"))
 
 
+def _domains(config):
+    return initialize_domains(config.io, config.stats, config.metrics, config.viz)
+
+
+def _offline_problems(config):
+    return tfetch.offline_problems(_domains(config), config.io)
+
+
 def _record_path(config):
     return config.io.observations_file.with_name("obs.parquet.fetch.json")
 
@@ -93,7 +101,7 @@ def downloads(monkeypatch):
 # The plan                                                              #
 # --------------------------------------------------------------------- #
 def test_each_observing_domain_is_planned_over_its_files_times(config):
-    assert tfetch.plan_observations(config) == [
+    assert tfetch.plan_observations(_domains(config), config.io) == [
         tfetch.ObservationRequest(DOMAIN, (DOMAIN,), TIMES[0], TIMES[-1])
     ]
 
@@ -101,7 +109,7 @@ def test_each_observing_domain_is_planned_over_its_files_times(config):
 def test_a_run_that_observes_nothing_plans_nothing(config):
     config.viz.hydrographs.enabled = False
 
-    assert tfetch.plan_observations(config) == []
+    assert tfetch.plan_observations(_domains(config), config.io) == []
 
 
 # --------------------------------------------------------------------- #
@@ -139,7 +147,7 @@ def test_a_gage_nwis_has_no_data_for_still_counts_as_fetched(config, monkeypatch
     tfetch.fetch(config)
 
     assert len(calls) == 1
-    assert tfetch.offline_problems(config) == []
+    assert _offline_problems(config) == []
 
 
 def test_a_longer_window_is_fetched_again(run_dir, config, downloads):
@@ -248,13 +256,13 @@ def test_a_failed_download_writes_nothing(config, monkeypatch):
 # Offline                                                               #
 # --------------------------------------------------------------------- #
 def test_offline_needs_the_observations_file(config):
-    assert "does not exist" in tfetch.offline_problems(config)[0]
+    assert "does not exist" in _offline_problems(config)[0]
 
 
 def test_offline_is_ready_after_a_fetch(config, downloads):
     tfetch.fetch(config)
 
-    assert tfetch.offline_problems(config) == []
+    assert _offline_problems(config) == []
 
 
 def test_offline_names_a_domain_the_fetch_did_not_cover(config, downloads):
@@ -263,14 +271,14 @@ def test_offline_names_a_domain_the_fetch_did_not_cover(config, downloads):
         json.dumps({"version": tfetch.RECORD_VERSION, "requests": []})
     )
 
-    assert tfetch.offline_problems(config)[0].startswith(f"[{DOMAIN}]")
+    assert _offline_problems(config)[0].startswith(f"[{DOMAIN}]")
 
 
 def test_offline_does_not_trust_a_date_only_record(config, downloads):
     tfetch.fetch(config)
     _write_date_only_record(config)
 
-    problems = tfetch.offline_problems(config)
+    problems = _offline_problems(config)
 
     assert len(problems) == 1
     assert problems[0].startswith(f"[{DOMAIN}]")
@@ -281,7 +289,7 @@ def test_offline_trusts_an_observations_file_fetch_did_not_write(config):
     config.io.observations_file.parent.mkdir()
     pd.DataFrame({DOMAIN: [1.0]}, index=TIMES[:1]).to_parquet(config.io.observations_file)
 
-    assert tfetch.offline_problems(config) == []
+    assert _offline_problems(config) == []
 
 
 def _offline_config(run_dir, **io) -> TevalConfig:

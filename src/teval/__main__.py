@@ -96,17 +96,17 @@ def main():
     domain_map = {}
 
     if run_domain_processing:
+        with Timer("Domain Discovery", category="discovery"):
+            domain_map = initialize_domains(config.io, config.stats, config.metrics, config.viz)
+
         if config.io.offline:
-            problems = offline_problems(config)
+            problems = offline_problems(domain_map, config.io)
             for problem in problems:
                 logger.error(problem)
             if problems:
                 logger.error("Run with --fetch where there is network access first.")
                 sys.exit(1)
 
-        with Timer("Domain Discovery", category="discovery"):
-            domain_map = initialize_domains(config.io, config.stats, config.metrics, config.viz)
-        
         n = len(domain_map)
         logger.info(f"Found {n} domain(s) to process.")
         metrics_list = []

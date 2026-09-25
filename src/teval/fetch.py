@@ -10,16 +10,16 @@ offline run draws no basemaps instead.
 
 Public API
 ----------
-plan_observations(config)
+plan_observations(domain_map, io)
     One request per domain that needs observations: its gages and period.
 
 fetch(config)
     Download every planned request into ``io.observations_file``, unless the
     file already holds them.
 
-offline_problems(config)
-    Why an offline run of this configuration would lack observations; empty if
-    it would not.
+offline_problems(domain_map, io)
+    Why an offline run of these domains would lack observations; empty if it
+    would not.
 
 RECORD_VERSION
     The version of the record ``fetch`` writes beside the observations.
@@ -31,11 +31,11 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from teval.config import TevalConfig
+from teval.config import IOConfig, TevalConfig
 from teval.io import initialize_domains
 from teval.io.hydrofabric import read_gage_ids
 from teval.io.observations import download_observations
@@ -90,23 +90,21 @@ class ObservationRequest:
         )
 
 
-def plan_observations(config: TevalConfig) -> List[ObservationRequest]:
+def plan_observations(domain_map: Dict, io: IOConfig) -> List[ObservationRequest]:
     """
-    One request per domain that the run would fetch observations for.
+    One request per discovered domain that the run would fetch observations for.
 
     Asks the same questions the run does -- which domains observe, which gages,
     over which window -- but reads only gage IDs and time coordinates, so it is
     cheap enough for a login node.  Gages are the all-digit IDs NWIS is asked
     for, and a superset of those the run's crosswalk keeps.
     """
-    domain_map = initialize_domains(config.io, config.stats, config.metrics, config.viz)
-
     requests = []
     for domain_name, entry in domain_map.items():
         # Discovery leaves gage_obs empty when nothing in the run uses observations
         if not entry["gage_obs"]:
             continue
-        hydrofabric_gages = read_gage_ids(entry["hydrofabric"], config.io.hydrofabric_layer)
+        hydrofabric_gages = read_gage_ids(entry["hydrofabric"], io.hydrofabric_layer)
         gages = sorted(
             g for g in domain_gage_ids(entry, hydrofabric_gages) if str(g).isdigit()
         )
@@ -164,7 +162,8 @@ def fetch(config: TevalConfig) -> None:
         Observations are needed but ``io.observations_file`` is unset or not
         ``.csv`` or ``.parquet``.
     """
-    plan = plan_observations(config)
+    domain_map = initialize_domains(config.io, config.stats, config.metrics, config.viz)
+    plan = plan_observations(domain_map, config.io)
     if not plan:
         logger.info("This configuration needs no observations; nothing to fetch.")
         return
@@ -215,18 +214,18 @@ def fetch(config: TevalConfig) -> None:
     logger.info(f"Observations for {len(obs_df.columns)} gage(s) saved -> {observations_file}")
 
 
-def offline_problems(config: TevalConfig) -> List[str]:
+def offline_problems(domain_map: Dict, io: IOConfig) -> List[str]:
     """
-    Why an offline run of this configuration would lack observations.
+    Why an offline run of these discovered domains would lack observations.
 
     A file ``fetch`` wrote must cover every planned request.  A file it did not
     write is trusted as it is.  Empty when nothing is missing.
     """
-    plan = plan_observations(config)
+    plan = plan_observations(domain_map, io)
     if not plan:
         return []
 
-    observations_file = config.io.observations_file
+    observations_file = io.observations_file
     if observations_file is None:
         return ["The run needs observations, but io.observations_file is not set."]
     if not observations_file.exists():
