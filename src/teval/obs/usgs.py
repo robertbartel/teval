@@ -121,8 +121,6 @@ def fetch_usgs_streamflow(
     
     if isinstance(site_ids, str):
         site_ids = [site_ids]
-    if chunk_size < 1:
-        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
     # Distinct chunks keep a site from appearing in two responses.
     site_ids = list(dict.fromkeys(site_ids))
 
