@@ -101,8 +101,7 @@ def formulation_time_bounds(formulation_dict: Dict) -> tuple:
 
     A pre-computed ensemble with a time coordinate decides it; otherwise the
     raw files do, spanning all of them as their combined dataset would.  Reads
-    time coordinates only, so ``--fetch`` can ask it without loading data.
-    ``(None, None)`` when no file reports a time.
+    time coordinates only.  ``(None, None)`` when no file reports a time.
     """
     if reuses_precomputed_ensemble(formulation_dict):
         with xr.open_dataset(formulation_dict["ensemble_file"], engine="h5netcdf") as ds:

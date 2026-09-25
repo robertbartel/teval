@@ -53,10 +53,9 @@ class IOConfig(BaseModel):
     offline: bool = Field(
         default=False,
         description=(
-            "Run without network access, as on compute nodes that have none. "
-            "No USGS download is attempted and no basemap is drawn. Observations "
-            "must already be in observations_file (see --fetch); the run checks "
-            "this before processing and stops if they are not."
+            "Run without network access, as on compute nodes: no USGS download "
+            "and no basemaps. Observations must already be in observations_file "
+            "(see --fetch); the run stops at startup if they are not."
         ),
     )
     save_downloaded_obs: Optional[Path] = Field(

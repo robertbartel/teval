@@ -90,7 +90,7 @@ def read_gage_ids(gpkg_path: Optional[Path], gpkg_layer: str = "flowpaths") -> L
 
     A superset of the IDs ``load_hydrofabric`` returns: for the v4.0 schema it
     keeps every NWIS gage in the hydrolocations layer, including any the full
-    crosswalk later drops.  Cheap enough to run on a login node.
+    crosswalk later drops.
     """
     if not gpkg_path:
         return []

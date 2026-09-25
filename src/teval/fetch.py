@@ -152,12 +152,11 @@ def fetch(config: TevalConfig) -> None:
     """
     Download the observations this configuration's run needs.
 
-    They go to ``io.observations_file``, which the run already reads before
-    anything else, with a record of the requests beside it.  If that record
-    shows every planned request was already made, nothing is downloaded; a
-    gage NWIS has no data for counts as requested.  Otherwise every request is
-    downloaded afresh and the file replaced.  An existing file without a
-    record was not written here and is left alone.
+    They go to ``io.observations_file``, with a record of the requests beside
+    it.  If the record shows every planned request already made, nothing is
+    downloaded; a gage NWIS has no data for counts as requested.  Otherwise
+    every request is downloaded afresh and the file replaced.  An existing
+    file without a record was not written here and is left alone.
 
     Raises
     ------
