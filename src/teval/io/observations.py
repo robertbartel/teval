@@ -91,8 +91,7 @@ def fetch_observations(
     Priority
     --------
     1. Read from io.observations_file (Parquet or CSV) if it exists.
-    2. Fall back to the USGS NWIS API if io.auto_download_usgs is True and
-       io.offline is not.
+    2. Fall back to the USGS NWIS API if io.auto_download_usgs is True.
     3. Return an empty DataFrame and log a warning otherwise.
 
     Gage ID normalization
@@ -190,7 +189,7 @@ def fetch_observations(
         return obs_df
 
     # USGS API fallback
-    if io.auto_download_usgs and not io.offline:
+    if io.auto_download_usgs:
         logger.info("Fetching USGS data via API...")
         obs_df = download_observations(gage_ids, t_min, t_max)
 
@@ -206,5 +205,5 @@ def fetch_observations(
         return obs_df
 
     # Nothing available
-    logger.warning("No observation file provided and auto_download is disabled or the run is offline.")
+    logger.warning("No observation file provided and auto_download is disabled.")
     return obs_df

@@ -4,7 +4,7 @@ import yaml
 import textwrap
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class IOConfig(BaseModel):
@@ -482,6 +482,14 @@ class TevalConfig(BaseModel):
     stats: StatsConfig = StatsConfig()
     metrics: MetricsConfig = MetricsConfig()
     viz: VizConfig = VizConfig()
+
+    @model_validator(mode="after")
+    def _offline_uses_no_network(self) -> "TevalConfig":
+        """``io.offline`` turns off everything that would reach the network."""
+        if self.io.offline:
+            self.io.auto_download_usgs = False
+            self.viz.skill_maps.basemap = False
+        return self
 
     @classmethod
     def from_yaml(cls, path: Union[str, Path]) -> "TevalConfig":

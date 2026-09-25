@@ -371,7 +371,7 @@ def run_skill_maps(
                     metrics_df=metrics_df_skill[metrics_df_skill["source"] == src],
                     variable=metric,
                     output_path=skill_dir / f"map_{metric}_{src}.png",
-                    add_basemap=config.viz.skill_maps.basemap and not config.io.offline,
+                    add_basemap=config.viz.skill_maps.basemap,
                     title=f"{metric.upper()} — {src}",
                 )))
 
@@ -380,7 +380,7 @@ def run_skill_maps(
                 metrics_df=metrics_df_skill,
                 metric=metric,
                 output_path=skill_dir / f"map_winner_{metric}.png",
-                add_basemap=config.viz.skill_maps.basemap and not config.io.offline,
+                add_basemap=config.viz.skill_maps.basemap,
             )))
 
         if config.viz.skill_maps.boxplots:

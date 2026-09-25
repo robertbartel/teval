@@ -284,17 +284,27 @@ def test_offline_trusts_an_observations_file_fetch_did_not_write(config):
     assert tfetch.offline_problems(config) == []
 
 
-def test_offline_never_downloads(config, monkeypatch):
+def _offline_config(run_dir, **io) -> TevalConfig:
+    config = _config_dict(run_dir, run_dir / "obs" / "obs.parquet")
+    config["io"].update(offline=True, **io)
+    config["viz"]["skill_maps"] = {"enabled": True, "basemap": True}
+    return TevalConfig(**config)
+
+
+def test_offline_never_downloads(run_dir, monkeypatch):
     def fail(*args, **kwargs):
         raise AssertionError("an offline run reached for the network")
 
     monkeypatch.setattr(observations, "download_observations", fail)
-    config.io.auto_download_usgs = True
-    config.io.offline = True
+    config = _offline_config(run_dir, auto_download_usgs=True)
 
     obs = fetch_observations([DOMAIN], TIMES[0], TIMES[-1], config.io)
 
     assert obs.empty
+
+
+def test_offline_draws_no_skill_map_basemaps(run_dir):
+    assert not _offline_config(run_dir).viz.skill_maps.basemap
 
 
 def _main(run_dir, monkeypatch, *flags, offline=False):
