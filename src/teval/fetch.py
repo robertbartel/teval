@@ -121,13 +121,18 @@ def _record_path(observations_file: Path) -> Path:
     return observations_file.with_name(observations_file.name + ".fetch.json")
 
 
-def _recorded_requests(observations_file: Path) -> Optional[List[ObservationRequest]]:
+def _unfetched(
+    plan: List[ObservationRequest], observations_file: Path
+) -> Optional[List[ObservationRequest]]:
     """
-    What ``fetch`` requested for this file: None if it did not write it, empty
-    if its record is not of ``RECORD_VERSION``.
+    The planned requests ``fetch`` has not made into this file: all of them if
+    the file does not exist or its record is not of ``RECORD_VERSION``, None if
+    ``fetch`` did not write it.
     """
+    if not observations_file.exists():
+        return plan
     record = _record_path(observations_file)
-    if not (observations_file.exists() and record.exists()):
+    if not record.exists():
         return None
     data = json.loads(record.read_text())
     if data.get("version") != RECORD_VERSION:
@@ -136,13 +141,8 @@ def _recorded_requests(observations_file: Path) -> Optional[List[ObservationRequ
             f"{observations_file} counts as holding no observations. Older "
             "versions left out the first hours of each period."
         )
-        return []
-    return [ObservationRequest.from_json(r) for r in data["requests"]]
-
-
-def _uncovered(
-    plan: List[ObservationRequest], recorded: List[ObservationRequest]
-) -> List[ObservationRequest]:
+        return plan
+    recorded = [ObservationRequest.from_json(r) for r in data["requests"]]
     return [r for r in plan if not any(r.covered_by(done) for done in recorded)]
 
 
@@ -178,14 +178,14 @@ def fetch(config: TevalConfig) -> None:
             f"io.observations_file must be .csv or .parquet, not {observations_file.name}."
         )
 
-    recorded = _recorded_requests(observations_file)
-    if recorded is None and observations_file.exists():
+    unfetched = _unfetched(plan, observations_file)
+    if unfetched is None:
         logger.warning(
             f"{observations_file} was not written by --fetch, so it is left as it "
             "is. Point io.observations_file elsewhere to fetch."
         )
         return
-    if recorded is not None and not _uncovered(plan, recorded):
+    if not unfetched:
         logger.info(f"{observations_file} already holds every observation needed.")
         return
 
@@ -231,11 +231,11 @@ def offline_problems(domain_map: Dict, io: IOConfig) -> List[str]:
     if not observations_file.exists():
         return [f"The run needs observations, but {observations_file} does not exist."]
 
-    recorded = _recorded_requests(observations_file)
-    if recorded is None:
+    unfetched = _unfetched(plan, observations_file)
+    if unfetched is None:
         return []
     return [
         f"[{r.domain}] {observations_file} lacks observations for "
         f"{len(r.gages)} gage(s), {r.describe_period()}."
-        for r in _uncovered(plan, recorded)
+        for r in unfetched
     ]
