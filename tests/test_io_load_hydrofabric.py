@@ -25,8 +25,9 @@ def _layers(monkeypatch, flowpaths: pd.DataFrame, network: pd.DataFrame) -> None
         "network": gpd.GeoDataFrame(network),
     }
 
-    def read_file(path, layer):
-        return frames[layer].copy()
+    def read_file(path, layer, columns=None, ignore_geometry=False):
+        frame = frames[layer]
+        return (frame[columns] if columns else frame).copy()
 
     monkeypatch.setattr(hydrofabric.gpd, "read_file", read_file)
 
