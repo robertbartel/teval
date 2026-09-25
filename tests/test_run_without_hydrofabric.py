@@ -10,11 +10,9 @@ That is the path the ensemble orchestrator's configuration always takes.
 
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
 
-import dask
 import numpy as np
 import pandas as pd
 import pytest
@@ -35,21 +33,7 @@ FEATURE_IDS = [101, 201]
 N_TIMES = 4
 TIMES = pd.date_range("2020-06-01", periods=N_TIMES, freq="h")
 
-
-@pytest.fixture(autouse=True)
-def restore_global_state():
-    """
-    Put the logger levels and Dask's worker count back after each run.
-
-    ``main`` sets all three globally; left alone they would outlive this
-    module and change what every later test sees.
-    """
-    root_level = logging.getLogger().level
-    teval_level = logging.getLogger("teval").level
-    with dask.config.set(num_workers=dask.config.get("num_workers", None)):
-        yield
-    logging.getLogger().setLevel(root_level)
-    logging.getLogger("teval").setLevel(teval_level)
+pytestmark = pytest.mark.usefixtures("restore_global_state")
 
 
 # --------------------------------------------------------------------- #
@@ -132,7 +116,6 @@ def _disabled_configs(run_inputs: dict) -> tuple:
 # Discovery                                                             #
 # --------------------------------------------------------------------- #
 def test_discovery_completes_with_stats_metrics_and_map_all_disabled(run_inputs):
-    """With stats, metrics and the map off, discovery still returns the domain."""
     io, stats, metrics, viz = _disabled_configs(run_inputs)
     assert not (stats.enabled or metrics.enabled or viz.interactive_map.enabled)
 

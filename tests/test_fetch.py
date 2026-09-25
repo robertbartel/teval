@@ -9,10 +9,8 @@ checks before it starts.
 from __future__ import annotations
 
 import json
-import logging
 import sys
 
-import dask
 import numpy as np
 import pandas as pd
 import pytest
@@ -297,17 +295,6 @@ def test_offline_never_downloads(config, monkeypatch):
     obs = fetch_observations([DOMAIN], TIMES[0], TIMES[-1], config.io)
 
     assert obs.empty
-
-
-@pytest.fixture
-def restore_global_state():
-    """``main`` sets logger levels and Dask's worker count globally."""
-    root_level = logging.getLogger().level
-    teval_level = logging.getLogger("teval").level
-    with dask.config.set(num_workers=dask.config.get("num_workers", None)):
-        yield
-    logging.getLogger().setLevel(root_level)
-    logging.getLogger("teval").setLevel(teval_level)
 
 
 def _main(run_dir, monkeypatch, *flags, offline=False):

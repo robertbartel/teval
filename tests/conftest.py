@@ -16,6 +16,9 @@ helper functions they share are in ``weighting_support.py``.
 
 from __future__ import annotations
 
+import logging
+
+import dask
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -206,3 +209,17 @@ def no_hydrofabric(monkeypatch):
         "load_hydrofabric",
         lambda gpkg_path, gpkg_layer: (gpd.GeoDataFrame(), [], {}, {}),
     )
+
+
+# --------------------------------------------------------------------- #
+# Whole runs                                                            #
+# --------------------------------------------------------------------- #
+@pytest.fixture
+def restore_global_state():
+    """Undo the logger levels and Dask worker count ``teval.__main__.main`` sets."""
+    root_level = logging.getLogger().level
+    teval_level = logging.getLogger("teval").level
+    with dask.config.set(num_workers=dask.config.get("num_workers", None)):
+        yield
+    logging.getLogger().setLevel(root_level)
+    logging.getLogger("teval").setLevel(teval_level)
