@@ -134,6 +134,22 @@ def test_a_second_fetch_downloads_nothing(config, downloads):
     assert len(downloads) == 1
 
 
+def test_domains_over_one_period_share_a_download(config, downloads, monkeypatch):
+    plan = [
+        tfetch.ObservationRequest("a", ("01010101", "02020202"), TIMES[0], TIMES[-1]),
+        tfetch.ObservationRequest("b", ("02020202", "03030303"), TIMES[0], TIMES[-1]),
+        tfetch.ObservationRequest("c", ("02020202",), TIMES[1], TIMES[-1]),
+    ]
+    monkeypatch.setattr(tfetch, "plan_observations", lambda domain_map, io: plan)
+
+    tfetch.fetch(config)
+
+    assert [call[:3] for call in downloads] == [
+        (["01010101", "02020202", "03030303"], TIMES[0], TIMES[-1]),
+        (["02020202"], TIMES[1], TIMES[-1]),
+    ]
+
+
 def test_a_gage_nwis_has_no_data_for_still_counts_as_fetched(config, monkeypatch):
     calls = []
 

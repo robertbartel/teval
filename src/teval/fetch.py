@@ -187,15 +187,19 @@ def fetch(config: TevalConfig) -> None:
         logger.info(f"{observations_file} already holds every observation needed.")
         return
 
-    obs_df = pd.DataFrame()
+    # Domains over the same period share one download, so no gage is fetched twice
+    by_period: Dict[Tuple[pd.Timestamp, pd.Timestamp], List[ObservationRequest]] = {}
     for request in plan:
+        by_period.setdefault((request.start, request.end), []).append(request)
+
+    obs_df = pd.DataFrame()
+    for (start, end), requests in by_period.items():
+        gages = sorted(set().union(*(r.gages for r in requests)))
         logger.info(
-            f"[{request.domain}] Downloading {len(request.gages)} gage(s), "
-            f"{request.describe_period()}"
+            f"[{', '.join(r.domain for r in requests)}] Downloading {len(gages)} "
+            f"gage(s), {requests[0].describe_period()}"
         )
-        downloaded = download_observations(
-            list(request.gages), request.start, request.end, raise_errors=True
-        )
+        downloaded = download_observations(gages, start, end, raise_errors=True)
         obs_df = obs_df.combine_first(downloaded)
 
     observations_file.parent.mkdir(parents=True, exist_ok=True)
