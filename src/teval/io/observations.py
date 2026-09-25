@@ -11,6 +11,9 @@ fetch_observations(gage_ids, t_min, t_max, io)
 
 download_observations(gage_ids, t_min, t_max)
     Download hourly USGS NWIS streamflow (m³/s) for the gages and period.
+
+nwis_gage_ids(gage_ids)
+    The IDs NWIS can be asked for.
 """
 
 from __future__ import annotations
@@ -39,6 +42,11 @@ def _normalize_gage_id(g) -> str:
     return s.zfill(8) if len(s) <= 8 else s
 
 
+def nwis_gage_ids(gage_ids) -> List[str]:
+    """The IDs NWIS can be asked for: the all-digit ones, as strings."""
+    return [str(g) for g in gage_ids if str(g).isdigit()]
+
+
 # How far beyond each end of the period observations are requested, so the
 # hourly means at its ends average whole hours and interpolation reaches them.
 DOWNLOAD_PADDING = pd.Timedelta(hours=1)
@@ -62,7 +70,7 @@ def download_observations(
     index, interpolated across gaps; empty if nothing was requested or found.
     With *raise_errors*, a failed request raises rather than returning empty.
     """
-    clean_gages = [str(g) for g in gage_ids if str(g).isdigit()]
+    clean_gages = nwis_gage_ids(gage_ids)
     if not clean_gages:
         return pd.DataFrame()
 

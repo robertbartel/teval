@@ -38,7 +38,7 @@ import pandas as pd
 from teval.config import IOConfig, TevalConfig
 from teval.io import initialize_domains
 from teval.io.hydrofabric import read_gage_ids
-from teval.io.observations import download_observations
+from teval.io.observations import download_observations, nwis_gage_ids
 from teval.workflow import domain_gage_ids, formulation_time_bounds
 
 logger = logging.getLogger(__name__)
@@ -105,9 +105,7 @@ def plan_observations(domain_map: Dict, io: IOConfig) -> List[ObservationRequest
         if not entry["gage_obs"]:
             continue
         hydrofabric_gages = read_gage_ids(entry["hydrofabric"], io.hydrofabric_layer)
-        gages = sorted(
-            g for g in domain_gage_ids(entry, hydrofabric_gages) if str(g).isdigit()
-        )
+        gages = sorted(nwis_gage_ids(domain_gage_ids(entry, hydrofabric_gages)))
         t_min, t_max = formulation_time_bounds(entry["formulations"])
         if gages and t_min is not None:
             requests.append(
